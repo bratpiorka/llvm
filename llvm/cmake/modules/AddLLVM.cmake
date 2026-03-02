@@ -2121,11 +2121,16 @@ function(add_lit_target target comment)
     list(APPEND LIT_COMMAND --param ${param})
   endforeach()
   if (ARG_UNPARSED_ARGUMENTS)
-    add_custom_target(${target}
-      COMMAND ${LIT_COMMAND} ${ARG_UNPARSED_ARGUMENTS}
-      COMMENT "${comment}"
-      USES_TERMINAL
-      )
+    # check if target exists
+    if (TARGET ${target})
+      message(WARNING "Target ${target} already exists.")
+    else()
+      add_custom_target(${target}
+        COMMAND ${LIT_COMMAND} ${ARG_UNPARSED_ARGUMENTS}
+        COMMENT "${comment}"
+        USES_TERMINAL
+        )
+    endif()
   else()
     add_custom_target(${target}
       COMMAND ${CMAKE_COMMAND} -E echo "${target} does nothing, no tools built.")

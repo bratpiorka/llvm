@@ -28,8 +28,10 @@
 #include "NVPTX.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 
@@ -97,7 +99,25 @@ bool NVPTXLowerAlloca::runOnFunction(Function &F) {
             PointerType::get(ETy->getContext(), ADDRESS_SPACE_GENERIC), "");
         AllocaInGenericAS->insertAfter(AllocaInLocalAS->getIterator());
 
+        bool InterestingAlloca = false;
         for (Use &AllocaUse : llvm::make_early_inc_range(allocaInst->uses())) {
+          if (auto *DVI = dyn_cast<DbgVariableIntrinsic>(AllocaUse.getUser())) {
+            auto VarName =
+                DVI->getVariable() ? DVI->getVariable()->getName() : "";
+            if (VarName == "item")
+              InterestingAlloca = true;
+            if (VarName == "item") {
+              errs() << "nvptx-lower-alloca: in " << F.getName() << " alloca "
+                     << *allocaInst << " used by " << DVI->getOpcodeName()
+                     << " var='" << VarName << "' expr=";
+              if (DVI->getExpression())
+                DVI->getExpression()->print(errs());
+              else
+                errs() << "<null>";
+              errs() << "\n";
+            }
+          }
+
           // Check Load, Store, GEP, and BitCast Uses on alloca and make them
           // use the converted generic address, in order to expose non-generic
           // addrspacecast to NVPTXInferAddressSpaces. For other types
@@ -106,22 +126,30 @@ bool NVPTXLowerAlloca::runOnFunction(Function &F) {
           auto LI = dyn_cast<LoadInst>(AllocaUse.getUser());
           if (LI && LI->getPointerOperand() == allocaInst &&
               !LI->isVolatile()) {
+            if (InterestingAlloca)
+              errs() << "nvptx-lower-alloca: rewrite load ptr operand\n";
             LI->setOperand(LI->getPointerOperandIndex(), AllocaInGenericAS);
             continue;
           }
           auto SI = dyn_cast<StoreInst>(AllocaUse.getUser());
           if (SI && SI->getPointerOperand() == allocaInst &&
               !SI->isVolatile()) {
+            if (InterestingAlloca)
+              errs() << "nvptx-lower-alloca: rewrite store ptr operand\n";
             SI->setOperand(SI->getPointerOperandIndex(), AllocaInGenericAS);
             continue;
           }
           auto GI = dyn_cast<GetElementPtrInst>(AllocaUse.getUser());
           if (GI && GI->getPointerOperand() == allocaInst) {
+            if (InterestingAlloca)
+              errs() << "nvptx-lower-alloca: rewrite gep ptr operand\n";
             GI->setOperand(GI->getPointerOperandIndex(), AllocaInGenericAS);
             continue;
           }
           auto BI = dyn_cast<BitCastInst>(AllocaUse.getUser());
           if (BI && BI->getOperand(0) == allocaInst) {
+            if (InterestingAlloca)
+              errs() << "nvptx-lower-alloca: rewrite bitcast operand\n";
             BI->setOperand(0, AllocaInGenericAS);
             continue;
           }
